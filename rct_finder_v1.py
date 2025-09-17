@@ -14,10 +14,6 @@ import csv, json, re, time, requests
        from results.csv
     5. Configure how many RCTs to process at once by setting
        MAX_RESULTS below
-    6. Configure which Model to use by setting MODEL below
-    7. Run the program with the green play button in the toolbar
-    8. Stop the program at any time with the red stop button
-    9. Lastly, play with the prompt! It is really bad right now.
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
@@ -323,4 +319,5 @@ def find_publications_for_rcts(max_results: int):
 
 
 if __name__ == '__main__':
+
     find_publications_for_rcts(MAX_RESULTS)

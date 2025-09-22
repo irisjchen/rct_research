@@ -4,33 +4,37 @@ import csv, json, re, time, requests
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
                           INSTRUCTIONS
     1. Current progress (number of RCTs processed) is tracked in
-       checkpoint.txt. The program will automatically pick up where
+       <CHECKPOINT_FILE>. The program will automatically pick up where
        it left off when run multiple times
-    2. Model output will be stored in csv format to results.csv
+    2. Model output will be stored in csv format to <RESULTS_FILE>
     3. It will be helpful to run the program in several smaller
        batches rather than all 3,000 at once. It may also be helpful
-       to save intermediate versions of results.csv
-    4. To restart, reset checkpoint.txt back to 0 and clear all lines 
-       from results.csv
+       to save intermediate versions of <RESULTS_FILE>
+    4. To restart, reset <CHECKPOINT_FILE> back to 0 and clear all lines 
+       from <RESULTS_FILE>
     5. Configure how many RCTs to process at once by setting
-       MAX_RESULTS below
+       <MAX_RESULTS> below
+    6. Configure which Model to use by setting MODEL below
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 ''' Model Parameters '''
-MAX_RESULTS = 5  # Number of RCTs to process
+MAX_RESULTS = 10  # Number of RCTs to process
 MODEL = "gpt-5-nano"  # OpenAI model to use
-OPEN_AI_KEY = ''
+OPEN_AI_KEY = 'XX'
+RCT_INPUT_FILE = 'AEA_Complete_Only_2.csv'
+CHECKPOINT_FILE = "checkpoint.txt"
+RESULTS_FILE = "resultsv1.csv"
 
 ''' IO Helpers '''
 
 def load_checkpoint():
-    with open('checkpoint.txt', 'r') as checkpoint_file:
+    with open(CHECKPOINT_FILE, 'r') as checkpoint_file:
         return int(checkpoint_file.readline())
 
 
 def update_checkpoint(checkpoint):
-    with open('checkpoint.txt', 'w') as checkpoint_file:
+    with open(CHECKPOINT_FILE, 'w') as checkpoint_file:
         checkpoint_file.write(str(checkpoint))
 
 
@@ -51,7 +55,7 @@ def extract_other_primary_investigators(raw_text):
 
 def get_json(url, params=None, headers=None):
     for i in range(3):
-        r = requests.get(url, params=params, headers=headers, timeout=30)
+        r = requests.get(url, params=params, headers=headers, timeout=60)
         if r.status_code == 200:
             return r.json()
         else:
@@ -81,7 +85,6 @@ TOOLS = [
 
 ''' LLM Tool Implementations '''
 
-
 def crossref_filter(input_authors: list[str], all_results, max_results: int):
     input_authors = [author for author in input_authors if author.strip()]
     input_author_first_initial_last = set(
@@ -93,25 +96,25 @@ def crossref_filter(input_authors: list[str], all_results, max_results: int):
         try:
             authors_first_initial_last = set(
                 map(lambda author: f"{author['given'].lower()[0]}. {author['family'].lower()}", authors))
+            # At least 1 author must overlap (Format: I. Chen)
             if input_author_first_initial_last & authors_first_initial_last:
                 filtered_results.append(result)
-        except:
-            print(f"Error processing result, skipping... {result}")
+        except Exception as e:
+            print(f"Error processing result, skipping...\n Error: {e}\n Result: {result}")
 
     # Only return the top n results
     return filtered_results[:min(len(filtered_results), max_results)]
-
 
 def crossref_deduplicate(all_results):
     seen_titles = set()
     deduplicated_results = []
     for result in all_results:
+        # Title is an array for some reason
         if result['title'][0] not in seen_titles:
             seen_titles.add(result['title'][0])
             deduplicated_results.append(result)
 
     return deduplicated_results
-
 
 def tool_crossref_search(authors: list[str], search_terms: list[str], country: str, rct_end_date: str):
     params = {
@@ -120,14 +123,13 @@ def tool_crossref_search(authors: list[str], search_terms: list[str], country: s
         "sort": "score",
         "order": "desc",
         "filter": f"type:journal-article,from-pub-date:{rct_end_date}",
-        "mailto": "example@email.com",
+        "mailto": "email@gmail.com",
     }
 
     all_results = []
 
-    # Search first n authors individually
+    # Search first n authors individually by Last Name
     for i in range(min(len(authors), 2)):
-        # Only author last name
         author = authors[i]
         params['query.author'] = author.split(' ')[-1]
         response = get_json("https://api.crossref.org/works", params=params)
@@ -157,7 +159,6 @@ def dispatch_tool(call, authors: list[str], country_names: str, rct_end_date: st
         match name:
             case "crossref_search":
                 return tool_crossref_search(
-                    # args['title'],
                     authors,
                     args['search_terms'],
                     country_names,
@@ -169,7 +170,6 @@ def dispatch_tool(call, authors: list[str], country_names: str, rct_end_date: st
 
 
 ''' Logic for interacting with the LLM '''
-
 
 def process_rct(
         client: OpenAI,
@@ -187,7 +187,7 @@ def process_rct(
     system_prompt = '''
     You are an RCT publication finder using the RCT metadata provided by the user.
 
-    Tool plan
+    Tool plan:
     1) Given the title and keywords, extract the 6-9 most defining, high-signal search terms, preserving multi-word concepts (e.g., “unconditional cash transfers”) when needed, prioritizing distinctive nouns/phrases, removing stopwords/generic words and duplicates, and return them lowercased as a comma-separated list in priority order
     2) Use crossref_search to find the published article following the matching criteria:
         Authors — HARD requirement: if 1 or 2 authors, require ≥1 match. If ≥2 authors, require ≥50% match of last names, boost score for higher overlap
@@ -218,29 +218,28 @@ def process_rct(
             "strict": True,
             "additionalProperties": False,
             "properties": {
-                "rct_title": {'type': 'string'},
                 "rct_id": {'type': 'string'},
+                "rct_title": {'type': 'string'},
                 "doi": {"type": "string"},
                 "title": {"type": "string"},
                 "journal": {"type": "string"},
                 "publisher_link": {"type": "string"},
             },
-            "required": ["rct_title", "rct_id", "doi", "title", "journal", "publisher_link"]
+            "required": ["rct_id", "rct_title", "doi", "title", "journal", "publisher_link"]
         }
     }
 
     # Results from tool calls will be appended to the message context
     num_tool_calls = 0
-    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": str(rct)}]
+    prompt_messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": str(rct)}]
     tool_call_messages = []
     while True:
-        print(f"num_tool_calls: {num_tool_calls}, tool_choice: {"auto" if num_tool_calls < 2 else "none"}")
         response = client.chat.completions.create(
             model=MODEL,
             tools=TOOLS,
             tool_choice="auto" if num_tool_calls < 2 else "none",
             stream=False,
-            messages=messages + tool_call_messages,
+            messages=prompt_messages + tool_call_messages,
             response_format={
                 "type": "json_schema",
                 "json_schema": schema,
@@ -248,10 +247,9 @@ def process_rct(
         )
 
         msg = response.choices[0].message
-        # always start a fresh message chain
+        # Only preserve response from the most recent tool tall
         tool_call_messages = [msg]
         if msg.tool_calls:
-            # Handle each tool call and feed the result back
             for call in msg.tool_calls:
                 result = dispatch_tool(call, authors, " ".join(country_names), rct_end_date)
                 tool_call_messages.append({
@@ -263,15 +261,14 @@ def process_rct(
             num_tool_calls += 1
         # If no more tool calls, return the final result
         else:
-            # Spot check results
             data = json.loads(msg.content.strip())  # strict schema guarantees valid JSON
             try:
-                row = [data["rct_id"], f'\"{data["rct_title"]}\"', data["doi"] or 'null', data["title"] or 'null', data["journal"] or 'null', data["publisher_link"] or 'null']
+                row = [rct_id, f'\"{title}\"', data["doi"] or 'null', data["title"] or 'null', data["journal"] or 'null', data["publisher_link"] or 'null']
                 print(f"Response: {row}")
                 return ",".join(row)
             except:
-                print(f"Error: {data}")
-                row = [rct_id, title, 'null', 'null', 'null', 'null']
+                print(f"Error parsing response from model. Response: {data}")
+                row = [rct_id, f'\"{title}\"', 'null', 'null', 'null', 'null']
                 return ",".join(row)
 
 
@@ -282,11 +279,10 @@ def find_publications_for_rcts(max_results: int):
     # Checkpoint so that the script can pick up where it left off if run multiple times
     checkpoint = load_checkpoint()
     results = 0
-    with open('AEA_Complete_Only_2.csv', 'r', encoding="utf-8") as aea_complete, open('results_cref1_1.csv', 'a',
-                                                                                      encoding="utf-8") as results_file:
-        aea_reader = csv.DictReader(aea_complete)
+    with open(RCT_INPUT_FILE, 'r', encoding="utf-8") as rct_file, open(RESULTS_FILE, 'a',encoding="utf-8") as results_file:
+        rct_reader = csv.DictReader(rct_file)
         rows_to_skip = checkpoint
-        for rct in aea_reader:
+        for rct in rct_reader:
             # Skip over any rows that were previously processed
             if (rows_to_skip > 0):
                 rows_to_skip -= 1
@@ -308,8 +304,7 @@ def find_publications_for_rcts(max_results: int):
             rct_end_date = rct['End date']
 
             # Delegate to LLM
-            result = process_rct(client, checkpoint, title, rct_url, rct_id, authors, keywords, country_names,
-                                 rct_end_date)
+            result = process_rct(client, checkpoint, title, rct_url, rct_id, authors, keywords, country_names, rct_end_date)
 
             # Update state
             results_file.write(result + "\n")
@@ -319,5 +314,4 @@ def find_publications_for_rcts(max_results: int):
 
 
 if __name__ == '__main__':
-
     find_publications_for_rcts(MAX_RESULTS)

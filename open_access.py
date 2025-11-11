@@ -3,18 +3,18 @@ import pprint
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
                           INSTRUCTIONS
-    1. Current progress (number of Publications processed) is tracked in
+    1. Current progress (number of DOIs processed) is tracked in
        <CHECKPOINT_FILE>. The program will automatically pick up where
        it left off when run multiple times
     2. Model output will be stored in csv format to <RESULTS_FILE>
-    3. Configure how many RCTs to process at once by setting
+    3. Configure how many DOIs to process at once by setting
        <MAX_RESULTS> below
 
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 ''' Model Parameters '''
-MAX_RESULTS = 1  # Number of publications to process
-PUBLICATION_INPUT_FILE = 'rct_results.csv'
+MAX_RESULTS = 1  # Number of DOIs to process
+DOI_INPUT_FILE = 'doi_results.csv'
 CHECKPOINT_FILE = "open_access_checkpoint.txt"
 RESULTS_FILE = "open_access_results.txt"
 
@@ -39,7 +39,7 @@ def get_json(url, params=None, headers=None):
         time.sleep(attempt)
     return None
 
-''' Publication Search Helpers '''
+''' DOI Search Helpers '''
 def try_get(valueProvider):
     try:
         value = valueProvider()
@@ -94,10 +94,10 @@ def find_open_publications(max_results: int):
     # Checkpoint so that the script can pick up where it left off if run multiple times
     checkpoint = load_checkpoint()
     results = 0
-    with open(PUBLICATION_INPUT_FILE, 'r', encoding="utf-8") as publication_file, open(RESULTS_FILE, 'a', encoding="utf-8") as results_file:
-        rct_reader = csv.reader(publication_file)
+    with open(DOI_INPUT_FILE, 'r', encoding="utf-8") as DOI_file, open(RESULTS_FILE, 'a', encoding="utf-8") as results_file:
+        doi_reader = csv.reader(DOI_file)
         rows_to_skip = checkpoint
-        for rct in rct_reader:
+        for doi in doi_reader:
             # Skip over any rows that were previously processed
             if (rows_to_skip > 0):
                 rows_to_skip -= 1
@@ -108,7 +108,7 @@ def find_open_publications(max_results: int):
                 return
 
             # Find DOI column in input csv file > change to n-1 for the column # it's stored in
-            doi = rct[0]
+            doi = doi[0]
             publication_results = find_publication_for_doi(doi)
 
             # Update state
@@ -120,3 +120,4 @@ def find_open_publications(max_results: int):
 if __name__ == '__main__':
 
     find_open_publications(MAX_RESULTS)
+

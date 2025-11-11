@@ -48,7 +48,8 @@ def try_get(valueProvider):
         return 'null'
 
 def search_open_alex(doi: str):
-    params = { "mailto": "irisch317@gmail.com" }
+    # Input your own email > otherwise, risk getting blocked
+    params = { "mailto": "example@gmail.com" }
     response = get_json(f"https://api.openalex.org/works/https://doi.org/{doi}", params=params)
     pprint.pprint(response)
     return response
@@ -106,8 +107,8 @@ def find_open_publications(max_results: int):
             if results >= max_results:
                 return
 
-            # Find publication
-            doi = rct[2]
+            # Find DOI column in input csv file > change to n-1 for the column # it's stored in
+            doi = rct[0]
             publication_results = find_publication_for_doi(doi)
 
             # Update state
@@ -117,4 +118,5 @@ def find_open_publications(max_results: int):
             results += 1
 
 if __name__ == '__main__':
+
     find_open_publications(MAX_RESULTS)

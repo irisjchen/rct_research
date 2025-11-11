@@ -13,10 +13,11 @@ import pprint
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 ''' Model Parameters '''
-MAX_RESULTS = 1  # Number of DOIs to process
-DOI_INPUT_FILE = 'doi_results.csv'
-CHECKPOINT_FILE = "open_access_checkpoint.txt"
-RESULTS_FILE = "open_access_results.txt"
+MAX_RESULTS = 20 # Number of DOIs to process
+DOI_INPUT_FILE = 'results_cref1_1v1.csv'
+CHECKPOINT_FILE = "OA_checkpoint.txt"
+RESULTS_FILE = "OA_results.csv"
+DEV_MODE = False # Full open alex responses are logged when dev mode is enabled
 
 ''' IO Helpers '''
 def load_checkpoint():
@@ -35,7 +36,7 @@ def get_json(url, params=None, headers=None):
         if r.status_code == 200:
             return r.json()
         elif attempt ==  max_attempts - 1:
-            print(r.text)
+            print(f'Error fetching {url}: {r.text}')
         time.sleep(attempt)
     return None
 
@@ -51,7 +52,8 @@ def search_open_alex(doi: str):
     # Input your own email > otherwise, risk getting blocked
     params = { "mailto": "example@gmail.com" }
     response = get_json(f"https://api.openalex.org/works/https://doi.org/{doi}", params=params)
-    pprint.pprint(response)
+    if DEV_MODE:
+        pprint.pprint(response)
     return response
 
 def find_publication_for_doi(doi: str):
@@ -60,8 +62,8 @@ def find_publication_for_doi(doi: str):
         doi,
         try_get(lambda: response['apc_list']['value']),
         try_get(lambda: response['apc_list']['currency']),
-        try_get(lambda: response['apc_paid']),
-        try_get(lambda: response['best_oa_location']),
+        try_get(lambda: response['apc_paid']['value']),
+        try_get(lambda: response['apc_paid']['currency']),
         try_get(lambda: response['cited_by_count']),
         try_get(lambda: response['open_access']['is_oa']),
         try_get(lambda: response['open_access']['oa_status']),
@@ -77,17 +79,27 @@ def find_publication_for_doi(doi: str):
         try_get(lambda: response['primary_location']['source']['host_organization_name']),
         try_get(lambda: response['primary_location']['source']['is_in_doaj']),
         try_get(lambda: response['primary_location']['source']['is_oa']),
+        try_get(lambda: response['best_oa_location']['is_oa']),
+        try_get(lambda: response['best_oa_location']['license']),
+        try_get(lambda: response['best_oa_location']['license_id']),
+        try_get(lambda: response['best_oa_location']['landing_page_url']),
+        try_get(lambda: response['best_oa_location']['pdf_url']),
+        try_get(lambda: response['best_oa_location']['raw_source_name']),
+        try_get(lambda: response['best_oa_location']['source']['host_organization_name']),
+        try_get(lambda: response['best_oa_location']['source']['is_in_doaj']),
+        try_get(lambda: response['best_oa_location']['source']['is_oa']),
     ]
-    for location in response['locations']:
-        csv_values.append(try_get(lambda: location['is_oa']))
-        csv_values.append(try_get(lambda: location['license']))
-        csv_values.append(try_get(lambda: location['license_id']))
-        csv_values.append(try_get(lambda: location['landing_page_url']))
-        csv_values.append(try_get(lambda: location['pdf_url']))
-        csv_values.append(try_get(lambda: location['raw_source_name']))
-        csv_values.append(try_get(lambda: location['source']['host_organization_name']))
-        csv_values.append(try_get(lambda: location['source']['is_in_doaj']))
-        csv_values.append(try_get(lambda: location['source']['is_oa']))
+    if response is not None:
+        for location in response['locations']:
+            csv_values.append(try_get(lambda: location['is_oa']))
+            csv_values.append(try_get(lambda: location['license']))
+            csv_values.append(try_get(lambda: location['license_id']))
+            csv_values.append(try_get(lambda: location['landing_page_url']))
+            csv_values.append(try_get(lambda: location['pdf_url']))
+            csv_values.append(try_get(lambda: location['raw_source_name']))
+            csv_values.append(try_get(lambda: location['source']['host_organization_name']))
+            csv_values.append(try_get(lambda: location['source']['is_in_doaj']))
+            csv_values.append(try_get(lambda: location['source']['is_oa']))
     return csv_values
 
 def find_open_publications(max_results: int):
@@ -120,4 +132,3 @@ def find_open_publications(max_results: int):
 if __name__ == '__main__':
 
     find_open_publications(MAX_RESULTS)
-
